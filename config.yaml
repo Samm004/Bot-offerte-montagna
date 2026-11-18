@@ -1,0 +1,167 @@
+# ============================================================================
+#  CONFIGURAZIONE DEL BOT OFFERTE
+#  Si puo' modificare direttamente da GitHub (icona della matita ✏️).
+#  Dopo ogni modifica il bot ricerca da capo i prodotti al giro successivo.
+# ============================================================================
+
+impostazioni:
+  ogni_quante_ore_cerco_nuovi_prodotti: 6   # ricerca nuovi colori/modelli sui negozi
+  pausa_tra_richieste_secondi: 2            # per non "martellare" i siti
+  ora_riepilogo_giornaliero: 9              # ora italiana del messaggio del mattino
+  avvisa_se_negozio_non_funziona_dopo: 3    # controlli falliti di fila prima dell'avviso
+
+# Negozi in cui il bot CERCA da solo i prodotti ({q} = testo cercato).
+# Tutti verificati: il bot riesce a leggere prezzo e disponibilita'.
+#   taglie_non_leggibili: true -> il negozio non dice quali taglie ha in magazzino;
+#   il bot avvisa lo stesso ma vi scrive "taglia da verificare".
+negozi:
+  - nome: Bergfreunde
+    ricerca: "https://www.bergfreunde.it/index.php?cl=search&searchparam={q}"
+  - nome: Bergzeit
+    ricerca: "https://www.bergzeit.it/search/?query={q}"
+  - nome: Oliunid
+    ricerca: "https://www.oliunid.it/catalogsearch/result/?q={q}"
+  - nome: Bananafingers
+    ricerca: "https://bananafingers.com/catalogsearch/result/?q={q}"
+  - nome: DF Sport Specialist
+    ricerca: "https://df-sportspecialist.it/search?q={q}"
+  - nome: Nencini Sport
+    ricerca: "https://www.nencinisport.it/it/search.html?searchkey={q}"
+  - nome: Sestogrado
+    ricerca: "https://www.sestogrado.it/it/?s={q}&post_type=product&type_aws=true"
+  - nome: Alpinstore
+    ricerca: "https://www.alpinstore.com/index.php?controller=search&search_query={q}"
+    taglie_non_leggibili: true
+  - nome: Max Sport Store
+    ricerca: "https://maxsportstore.com/search?q={q}"
+  - nome: Sportfits
+    ricerca: "https://sportfits.eu/search?sSearch={q}"
+  - nome: Tonton Outdoor          # ricerca non leggibile: solo i link_extra
+    sito: "https://www.tonton-outdoor.com"
+  # Sportler: NON incluso, il sito blocca i bot con un controllo anti-robot.
+
+# Parole che, se compaiono nel nome del prodotto, lo scartano sempre
+# (versioni da donna / bambino).
+escludi_sempre: [women, womens, woman, donna, damen, w, wmn, lady, ladies, femme, mujer,
+                 kids, kid, junior, jr, bambino, bambini, youth, boys, girls]
+
+# ----------------------------------------------------------------------------
+#  ARTICOLI DA CERCARE
+#   taglie       -> le taglie che vi vanno bene (per le corde: la lunghezza)
+#   prezzo_max   -> sotto questo prezzo (disponibile nella vostra taglia) arriva l'avviso 🔥
+#   prezzo_top   -> sotto questo prezzo l'avviso e' 🔥🔥 (affare vero)
+#   diametro     -> solo corde: diametro minimo e massimo in mm
+#   modelli      -> cosa cercare:
+#       cerca        testo da scrivere nella ricerca del negozio
+#       parole       parole che DEVONO esserci nel nome del prodotto
+#       escludi      parole che scartano il prodotto
+#       filtro_link  (opzionale) parole che devono esserci nel link della pagina
+#   link_extra   -> pagine prodotto da controllare sempre (negozi senza ricerca)
+# ----------------------------------------------------------------------------
+articoli:
+
+  # ------------------------------------------------------------- GUSCI
+  - id: guscio
+    nome: "Guscio hardshell"
+    taglie: [M, L]
+    prezzo_max: 300
+    prezzo_top: 250
+    # scarta pantaloni, ghette, guanti, giacche imbottite, pile... (stessi nomi di linea)
+    escludi: [pant, pants, pantaloni, pantalone, hose, bib, salopette, shorts, short, glove, gloves,
+              guanti, guanto, mitt, mitts, gilet, vest, cap, hat, berretto, beanie, fleece, pile,
+              down, piumino, primaloft, insulated, softshell, alpha, octa, warm1, warm2, warm3,
+              wool, merino, shirt, tshirt, maglia, maglietta, hoody, hoodie, bag, zaino,
+              gaiter, gaiters, ghetta, ghette, gamaschen, boot, boots, scarpone, scarponi, shoe, shoes]
+    modelli:
+      - cerca: "crater"                 # Mammut Crater IV / Light / Pro HS
+        parole: [mammut, crater]
+        escludi: [lake]
+      - cerca: "alto guide"             # Mammut Alto Guide HS
+        parole: [alto, guide]
+      - cerca: "triolet"                # Patagonia Triolet
+        parole: [triolet]
+      - cerca: "kangri"                 # Rab Kangri GTX
+        parole: [kangri]
+      - cerca: "latok"                  # Rab Latok Mountain GTX
+        parole: [latok]
+      - cerca: "makalu"                 # Mountain Equipment Makalu
+        parole: [equipment, makalu]
+      - cerca: "lhotse"                 # Mountain Equipment Lhotse
+        parole: [equipment, lhotse]
+      - cerca: "ortles gtx"             # Salewa Ortles GTX 3L / Pro
+        parole: [ortles, gtx]
+        filtro_link: [ortles]
+      - cerca: "beta jacket"            # Arc'teryx Beta / Beta LT / Beta AR
+        parole: [teryx, beta]
+        filtro_link: [beta]
+      - cerca: "falketind gore-tex"     # Norrona Falketind Gore-Tex
+        parole: [falketind, gore]
+        filtro_link: [falketind]
+      - cerca: "westalpen 3l"           # Ortovox Westalpen 3L
+        parole: [westalpen, 3l]
+        filtro_link: [westalpen]
+
+  # ------------------------------------------------------------- SCARPONI
+  - id: trango-alpine
+    nome: "La Sportiva Trango Alpine GTX"
+    taglie: ["42.5"]
+    prezzo_max: 300
+    prezzo_top: 260
+    modelli:
+      - cerca: "trango alpine"
+        parole: [trango, alpine]
+
+  - id: aequilibrium-st
+    nome: "La Sportiva Aequilibrium ST GTX"
+    taglie: ["42.5"]
+    prezzo_max: 300
+    prezzo_top: 250
+    modelli:
+      - cerca: "aequilibrium st"
+        parole: [aequilibrium, st]
+    link_extra:
+      - "https://www.tonton-outdoor.com/it_IT/p/la-sportiva-aequilibrium-st-gtx-uomo-3162"
+
+  # ------------------------------------------------------------- CORDE
+  # Il bot legge il diametro dal nome del prodotto (es. "Cobra II 8.6") e la
+  # lunghezza dalla variante (es. "60 m"). Le soglie di prezzo sono una mia
+  # stima: cambiatele come preferite.
+  - id: corda-60m-8mm
+    nome: "Corda ~8 mm da 60 m"
+    taglie: ["60m"]
+    diametro: [7.6, 8.7]
+    prezzo_max: 150
+    prezzo_top: 120
+    escludi: &escludi_corde [statica, static, semistatica, semi, cordino, cordini, accessory,
+                             kit, bag, sacca, sacco, telo, tarp, protector, protezione, marker]
+    modelli:
+      - {cerca: "beal cobra", parole: [cobra]}             # Beal Cobra II 8.6 (mezza)
+      - {cerca: "beal ice line", parole: [ice, line]}      # Beal Ice Line 8.1
+      - {cerca: "beal opera", parole: [opera]}             # Beal Opera 8.5 (singola)
+      - {cerca: "starling", parole: [starling]}            # Edelrid Starling 8.2
+      - {cerca: "paso guide", parole: [paso]}              # Petzl Paso Guide 7.7
+      - {cerca: "petzl salsa", parole: [salsa]}            # Petzl Salsa 8.2
+      - {cerca: "tendon alpine", parole: [tendon, alpine]} # Tendon Alpine 7.9
+      - {cerca: "alpine sender", parole: [alpine, sender]} # Mammut Alpine Sender 8.7
+      - {cerca: "alpine core", parole: [alpine, core]}     # Mammut Alpine Core 8.7
+      - {cerca: "mammut phoenix", parole: [phoenix]}       # Mammut Phoenix 8.0
+
+  - id: corda-80m-9-5mm
+    nome: "Corda ~9,5 mm da 80 m"
+    taglie: ["80m"]
+    diametro: [9.2, 9.8]
+    prezzo_max: 220
+    prezzo_top: 180
+    escludi: *escludi_corde
+    modelli:
+      - {cerca: "beal booster", parole: [booster]}         # Beal Booster III 9.7
+      - {cerca: "beal stinger", parole: [stinger]}         # Beal Stinger 9.4
+      - {cerca: "beal karma", parole: [karma]}             # Beal Karma 9.8
+      - {cerca: "crag classic", parole: [crag]}            # Mammut 9.5 Crag Classic / Dry
+      - {cerca: "mammut infinity", parole: [infinity]}     # Mammut Infinity 9.5
+      - {cerca: "petzl arial", parole: [arial]}            # Petzl Arial 9.5
+      - {cerca: "edelrid boa", parole: [boa]}              # Edelrid Boa 9.8
+      - {cerca: "edelrid eagle", parole: [eagle]}          # Edelrid Eagle Lite 9.5
+      - {cerca: "edelrid heron", parole: [heron]}          # Edelrid Heron 9.8
+      - {cerca: "tendon ambition", parole: [ambition]}     # Tendon Ambition 9.8
+      - {cerca: "edelweiss curve", parole: [curve]}        # Edelweiss Curve 9.8
