@@ -1,0 +1,52 @@
+name: Monitor offerte
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"     # ogni 15 minuti (GitHub a volte ritarda di qualche minuto)
+  workflow_dispatch:            # bottone "Run workflow" per lanciarlo a mano
+    inputs:
+      mode:
+        description: "Cosa fare"
+        type: choice
+        default: normale
+        options: [normale, test-telegram, riepilogo, riscopri]
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  controlla:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # memoria del bot (cosa ha gia' segnalato, pagine trovate, stato negozi)
+      - uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: stato-${{ github.run_id }}
+          restore-keys: stato-
+
+      - name: Controllo prezzi
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py --mode "${{ inputs.mode || 'normale' }}"
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: stato-${{ github.run_id }}-${{ github.run_attempt }}
