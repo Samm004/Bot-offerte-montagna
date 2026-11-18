@@ -100,8 +100,26 @@ class Fetcher:
         self.session = requests.Session(impersonate="chrome")
         self.session.headers.update({"Accept-Language": "it-IT,it;q=0.9,en;q=0.7"})
         self._first = True
+        self.blocked_streak = 0
+        self.gave_up = False   # il sito ci blocca: lo lasciamo stare fino al prossimo giro
 
     def get(self, url: str) -> tuple[int, str, str]:
+        if self.gave_up:
+            return -1, "", url
+        status, text, final = self._get(url)
+        if status == -1:
+            self.blocked_streak += 1
+            if self.blocked_streak == 3:
+                log(f"   ! {domain(url)} ci sta bloccando: aspetto 60 secondi")
+                time.sleep(60)
+            elif self.blocked_streak >= 5:
+                log(f"   ! {domain(url)} continua a bloccare: lo salto fino al prossimo giro")
+                self.gave_up = True
+        else:
+            self.blocked_streak = 0
+        return status, text, final
+
+    def _get(self, url: str) -> tuple[int, str, str]:
         """Ritorna (status, testo, url_finale). status 0 = errore di rete, -1 = bloccato."""
         if not self._first:
             time.sleep(self.delay)
@@ -132,6 +150,11 @@ class Fetcher:
 LD_RE = re.compile(r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>", re.S | re.I)
 # Nencini Sport: taglie nell'HTML con la quantita' disponibile
 NENCINI_SIZE_RE = re.compile(r'data-disponibilita="(\d+)"[^>]*?aria-label="[^"]*?taglia\s+([^"]+?)\s*"', re.S)
+# WooCommerce: <form ... data-product_variations="[...]">
+WOO_RE = re.compile(r'data-product_variations="([^"]+)"')
+# PrestaShop 1.6: var combinations = {"123":{"attributes_values":{"6":"42,5"}, ... "quantity":5, ...}}
+PRESTA_RE = re.compile(r'"attributes_values"\s*:\s*\{([^}]*)\}((?:(?!"attributes_values").){0,5000}?)'
+                       r'"quantity"\s*:\s*(-?\d+)', re.S)
 
 
 def _walk(o):
@@ -210,6 +233,7 @@ def extract_variants(page: str, page_url: str) -> list[dict]:
             if oname and oname != pname:
                 name = oname if pname and pname in oname else f"{pname} - {oname}" if oname not in pname else pname
             avail = str(of.get("availability") or "")
+            # disponibilita' non indicata = NON la consideriamo disponibile (solo cose certe)
             variants.append({
                 "name": name,
                 "group": str(group or pname),
@@ -218,19 +242,55 @@ def extract_variants(page: str, page_url: str) -> list[dict]:
                 "sku": str(of.get("sku") or p.get("sku") or ""),
                 "price": price,
                 "currency": str(of.get("priceCurrency") or spec.get("priceCurrency") or "EUR").upper(),
-                "available": (not avail) or any(k in avail for k in ("InStock", "LimitedAvailability", "OnlineOnly")),
+                "available": any(k in avail for k in ("InStock", "LimitedAvailability", "OnlineOnly")),
                 "avail_unknown": not avail,
                 "url": html.unescape(str(of.get("url") or p.get("url") or page_url)),
             })
 
-    # pagina con un solo prezzo ma taglie elencate nell'HTML (es. Nencini)
+    # WooCommerce (es. Sestogrado): varianti con disponibilita' vera nell'HTML
+    m = WOO_RE.search(page)
+    if m and variants:
+        try:
+            woo = json.loads(html.unescape(m.group(1)))
+        except json.JSONDecodeError:
+            woo = []
+        if isinstance(woo, list) and woo:
+            base = variants[0]
+            out = []
+            for w in woo:
+                attrs = w.get("attributes") or {}
+                vals = [str(v) for v in attrs.values() if v]
+                size = next((str(v) for k, v in attrs.items()
+                             if any(x in k for x in ("lunghezza", "taglia", "size", "misura", "length")) and v), "")
+                price = _price(w.get("display_price"))
+                if price is None:
+                    continue
+                out.append({**base, "name": f"{base['group']} - {' / '.join(vals)}", "size": size,
+                            "color": "", "sku": str(w.get("sku") or w.get("variation_id") or ""), "price": price,
+                            "available": bool(w.get("is_in_stock")) and w.get("is_purchasable", True) is not False,
+                            "avail_unknown": False, "url": base["url"].split("?")[0]})
+            if out:
+                return out
+
+    # pagina con un solo prezzo ma taglie elencate nell'HTML
     if len(variants) == 1 and not variants[0]["size"]:
-        sizes = NENCINI_SIZE_RE.findall(page)
+        base = variants[0]
+        sizes = NENCINI_SIZE_RE.findall(page)                       # Nencini Sport
         if sizes:
-            base = variants.pop()
-            for qty, size in sizes:
-                variants.append({**base, "size": size, "name": f"{base['name']} - {size}",
-                                 "sku": f"{base['sku']}-{size}", "available": int(qty) > 0, "avail_unknown": False})
+            return [{**base, "size": size, "name": f"{base['name']} - {size}", "sku": f"{base['sku']}-{size}",
+                     "available": int(qty) > 0, "avail_unknown": False} for qty, size in sizes]
+        combos = PRESTA_RE.findall(page)                            # PrestaShop (es. Alpinstore)
+        if combos:
+            out = []
+            for attr_vals, body, qty in combos:
+                vals = re.findall(r'"\d+"\s*:\s*"([^"]*)"', attr_vals)
+                impact = _price((re.search(r'"price"\s*:\s*(-?[\d.]+)', body) or [None, 0])[1]) or 0
+                size = vals[0] if vals else ""
+                out.append({**base, "size": size, "name": f"{base['name']} - {' / '.join(vals)}",
+                            "sku": f"{base['sku']}-{size}", "price": round(base["price"] + impact, 2),
+                            "available": int(qty) > 0, "avail_unknown": False})
+            if out:
+                return out
     return variants
 
 
@@ -241,6 +301,10 @@ def size_shape(s: str) -> str:
     """Tipo di taglia: lunghezza corda, numero scarpa, lettera."""
     if re.fullmatch(r"\d{2,3}M", s):
         return "corda"
+    if re.fullmatch(r"\d{2,3}CM", s):
+        return "cm"
+    if re.fullmatch(r"\d{1,2}PACK", s):
+        return "pack"
     if re.fullmatch(r"\d{2}(\.5|\.33|\.66)?", s):
         return "scarpa"
     if re.fullmatch(r"X{0,3}[SML]|XXL|XXXL", s):
@@ -264,6 +328,17 @@ def variant_sizes(v: dict) -> set[str]:
         out.add(norm_size(m.group(1)))
     for m in re.finditer(r"(?<![\d.,])(\d{2,3})\s*(?:m|mt|metri)\b", v["name"], re.I):  # corde: 60 m
         out.add(f"{m.group(1)}M")
+    for m in re.finditer(r"(?<![\d.,])(\d{2,3})\s*cm\b", v["name"], re.I):  # piccozze: 53 cm
+        out.add(f"{m.group(1)}CM")
+    # confezioni (rinvii): "Pack 6", "6-Pack", "6er-Set", "set da 5", "6 pz", "x6"
+    text = f"{v['name']} {v['size']}"
+    packs = re.findall(r"(?:pack|set|kit|lotto|confezione|conf\.)\s*(?:of|da|di|x)?\s*(\d{1,2})\b", text, re.I)
+    packs += re.findall(r"(?<![\d.,])(\d{1,2})\s*-?\s*(?:pack|pz|pezzi|pcs|pieces|stk|er-?pack|er-?set|er\b|x\b)",
+                        text, re.I)
+    packs += re.findall(r"(?:^|\s)x\s?(\d{1,2})\b", text, re.I)
+    for n in packs:
+        if 2 <= int(n) <= 12:
+            out.add(f"{int(n)}PACK")
     out.discard("")
     return out
 
@@ -278,6 +353,15 @@ def variant_label(v: dict) -> str:
 
 # --------------------------------------------------------------------------- config
 
+def _any_groups(v) -> list[set[str]]:
+    """parole_una_di: [a, b] = almeno una tra a,b; [[a, b], [c, d]] = almeno una per ogni gruppo."""
+    if not v:
+        return []
+    if all(not isinstance(x, list) for x in v):
+        return [{str(x).lower() for x in v}]
+    return [{str(y).lower() for y in (x if isinstance(x, list) else [x])} for x in v]
+
+
 def load_config(path: Path) -> dict:
     cfg = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
     cfg.setdefault("impostazioni", {})
@@ -287,9 +371,15 @@ def load_config(path: Path) -> dict:
     for it in cfg["articoli"]:
         it["taglie_norm"] = {norm_size(t) for t in it["taglie"]}
         it["escludi_tok"] = always_excl | {str(x).lower() for x in it.get("escludi", [])}
+        it["richiedi"] = _any_groups(it.get("richiedi_una_di"))
         for mod in it["modelli"]:
-            mod["parole_tok"] = {str(x).lower() for x in mod.get("parole") or tokens(mod["cerca"])}
-            mod["filtro_tok"] = {str(x).lower() for x in mod.get("filtro_link") or tokens(mod["cerca"])}
+            # "parole"/"filtro_link" assenti = parole del testo cercato; lista vuota = nessun vincolo
+            parole = mod["parole"] if "parole" in mod else tokens(mod["cerca"])
+            filtro = mod["filtro_link"] if "filtro_link" in mod else tokens(mod["cerca"])
+            mod["parole_tok"] = {str(x).lower() for x in parole or []}
+            mod["filtro_tok"] = {str(x).lower() for x in filtro or []}
+            mod["una_di"] = _any_groups(mod.get("parole_una_di"))
+            mod["filtro_una_di"] = {str(x).lower() for x in mod.get("filtro_link_una_di") or []}
             mod["escludi_tok"] = it["escludi_tok"] | {str(x).lower() for x in mod.get("escludi", [])}
     return cfg
 
@@ -311,7 +401,8 @@ def shop_for_url(cfg: dict, url: str) -> dict:
 
 # --------------------------------------------------------------------------- scoperta prodotti
 
-def find_product_links(page: str, final_url: str, filtro: set[str]) -> list[str]:
+def find_product_links(page: str, final_url: str, filtro: set[str], una_di: set[str] = frozenset(),
+                       limit: int = 12) -> list[str]:
     host = urlsplit(final_url).netloc
     raw = re.findall(r'href=["\']([^"\']+)["\']', page) + re.findall(r'"url"\s*:\s*"(https?:[^"]+)"', page)
     out = []
@@ -321,12 +412,13 @@ def find_product_links(page: str, final_url: str, filtro: set[str]) -> list[str]
         if sp.netloc != host:
             continue
         ptok = tokens(sp.path)
-        if not filtro <= ptok or ptok & SEARCH_PATH_WORDS or re.search(r"\.(jpe?g|png|webp|gif|svg)$", sp.path, re.I):
+        if not filtro <= ptok or (una_di and not una_di & ptok) or ptok & SEARCH_PATH_WORDS \
+                or re.search(r"\.(jpe?g|png|webp|gif|svg|css|js)$", sp.path, re.I) or len(sp.path) < 8:
             continue
         clean = urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))
         if clean not in out:
             out.append(clean)
-    return out[:12]
+    return out[:limit]
 
 
 def discover(cfg: dict, health: dict) -> dict[str, list[str]]:
@@ -335,20 +427,29 @@ def discover(cfg: dict, health: dict) -> dict[str, list[str]]:
     shops = [s for s in cfg["negozi"] if s.get("ricerca")]
 
     def per_shop(shop):
-        f = Fetcher(delay)
-        res, ok, tot = [], 0, 0
+        f = Fetcher(shop.get("pausa", delay))
+        per_search, ok, tot, seen_in = [], 0, 0, {}
         for it in cfg["articoli"]:
             for mod in it["modelli"]:
                 url = shop["ricerca"].format(q=quote_plus(mod["cerca"]))
                 status, page, final = f.get(url)
                 tot += 1
                 if status != 200:
-                    log(f"   ricerca {shop['nome']} '{mod['cerca']}': HTTP {status}")
+                    if not f.gave_up:
+                        log(f"   ricerca {shop['nome']} '{mod['cerca']}': HTTP {status}")
                     continue
                 ok += 1
-                links = find_product_links(page, final, mod["filtro_tok"])
-                res += [(it["id"], u) for u in links]
-        log(f"   ricerca su {shop['nome']:20} {ok}/{tot} ok, {len(res)} pagine candidate")
+                # link presenti in ogni pagina (menu, categorie): li contiamo per scartarli dopo
+                for u in set(find_product_links(page, final, set(), frozenset(), 10_000)):
+                    seen_in[u] = seen_in.get(u, 0) + 1
+                links = find_product_links(page, final, mod["filtro_tok"], mod["filtro_una_di"], 10_000)
+                per_search.append((it["id"], links, mod.get("max_link", 12)))
+        nav = {u for u, c in seen_in.items() if ok >= 8 and c > ok * 0.25}
+        res = []
+        for item_id, links, limit in per_search:
+            res += [(item_id, u) for u in [x for x in links if x not in nav][:limit]]
+        log(f"   ricerca su {shop['nome']:20} {ok}/{tot} ok, {len(set(u for _, u in res))} pagine candidate"
+            f" ({len(nav)} link di menu scartati)")
         return shop["nome"], res, ok, tot
 
     with ThreadPoolExecutor(max_workers=len(shops)) as ex:
@@ -367,7 +468,11 @@ def discover(cfg: dict, health: dict) -> dict[str, list[str]]:
 def match_model(item: dict, v: dict):
     name_tok = tokens(v["name"]) | tokens(v["group"])
     for mod in item["modelli"]:
-        if mod["parole_tok"] <= name_tok and not (mod["escludi_tok"] & name_tok):
+        # ricerche generiche (nessun nome di modello): il nome deve dire cos'e' (giacca, pantalone...)
+        if not mod["parole_tok"] and not all(g & name_tok for g in item["richiedi"]):
+            continue
+        if mod["parole_tok"] <= name_tok and not (mod["escludi_tok"] & name_tok) \
+                and all(g & name_tok for g in mod["una_di"]):
             if "diametro" in item:
                 lo, hi = item["diametro"]
                 if not any(lo <= d <= hi for d in diameters(v["group"] + " " + v["name"])):
@@ -376,7 +481,8 @@ def match_model(item: dict, v: dict):
     return None
 
 
-def check_products(cfg: dict, products: dict[str, list[str]], health: dict) -> tuple[list[dict], dict]:
+def check_products(cfg: dict, products: dict[str, list[str]], health: dict,
+                   deadline: float = float("inf")) -> tuple[list[dict], dict]:
     delay = cfg["impostazioni"].get("pausa_tra_richieste_secondi", 2)
     url_items: dict[str, list[str]] = {}
     for item_id, urls in products.items():
@@ -391,9 +497,14 @@ def check_products(cfg: dict, products: dict[str, list[str]], health: dict) -> t
 
     def per_shop(arg):
         shop, urls = arg
-        f = Fetcher(delay)
+        f = Fetcher(shop.get("pausa", delay))
         out, ok, parsed, kept = [], 0, 0, []
-        for u in urls:
+        for n, u in enumerate(urls):
+            if time.time() > deadline:  # tempo finito: le pagine rimaste si controllano al prossimo giro
+                kept += [(i, x) for x in urls[n:] for i in url_items[x]]
+                log(f"   {shop['nome']}: tempo scaduto, {len(urls) - n} pagine rimandate al prossimo giro")
+                urls = urls[:n]
+                break
             status, page, final = f.get(u)
             if status == 404 or status == 410:
                 continue  # prodotto rimosso
@@ -402,19 +513,24 @@ def check_products(cfg: dict, products: dict[str, list[str]], health: dict) -> t
                 continue
             ok += 1
             variants = extract_variants(page, final)
+            variants = list({(v["name"], v["size"], v["price"], v["available"]): v for v in variants}.values())
             if variants:
                 parsed += 1
             for item_id in url_items[u]:
                 it = items[item_id]
+                if u in (it.get("link_extra") or []):
+                    kept.append((item_id, u))
                 for v in variants:
                     mod = match_model(it, v)
                     if not mod:
                         continue
                     kept.append((item_id, u))
+                    if v["price"] < it.get("prezzo_min", 0):
+                        continue  # troppo economico per essere quello che cerchiamo
                     sizes = variant_sizes(v)
                     size_unknown = False
-                    if not (sizes & it["taglie_norm"]):
-                        if not shop.get("taglie_non_leggibili"):
+                    if it["taglie_norm"] and not (sizes & it["taglie_norm"]):
+                        if not (shop.get("taglie_non_leggibili") or it.get("avvisa_se_taglia_sconosciuta")):
                             continue
                         # se il nome indica chiaramente un'altra taglia (es. corda da 50 m), scarta
                         wanted_shapes = {size_shape(t) for t in it["taglie_norm"]} - {""}
@@ -514,8 +630,14 @@ def deal_messages(cfg, offers, state) -> list[str]:
 
     # un messaggio per articolo, una riga per pagina prodotto (la variante piu' economica + le altre)
     per_item: dict[str, list[list[dict]]] = {}
-    for (item_id, _shop, _page), group in to_notify.items():
-        per_item.setdefault(item_id, []).append(sorted(group, key=lambda o: o["price"]))
+    shown = set()
+    for (item_id, shop, _page), group in to_notify.items():
+        group = sorted(group, key=lambda o: o["price"])
+        sig = (item_id, shop, group[0]["group"] or group[0]["name"], group[0]["price"])
+        if sig in shown:  # stesso prodotto e prezzo su piu' pagine (es. colori diversi): una riga sola
+            continue
+        shown.add(sig)
+        per_item.setdefault(item_id, []).append(group)
     msgs = []
     max_lines = 10
     for item_id, groups in per_item.items():
@@ -573,7 +695,8 @@ def summary_message(cfg, offers, products, health) -> str:
     lines = ["☀️ <b>Riepilogo giornaliero</b> — bot attivo ✅", ""]
     for it in cfg["articoli"]:
         avail = [o for o in offers if o["item"] == it["id"] and o["available"] and o["currency"] == "EUR"]
-        lines.append(f"<b>{esc(it['nome'])}</b> (taglia {esc('/'.join(map(str, it['taglie'])))}, soglia {euro(it['prezzo_max'])})")
+        taglia = "/".join(map(str, it["taglie"])) or "tutte"
+        lines.append(f"<b>{esc(it['nome'])}</b> (taglia {esc(taglia)}, soglia {euro(it['prezzo_max'])})")
         if avail:
             shown = []
             for o in sorted(avail, key=lambda o: o["price"]):
@@ -628,15 +751,33 @@ def main():
     if (args.mode == "riscopri" or not last or state.get("config_hash") != config_hash(cfg)
             or now_utc() - datetime.fromisoformat(last) > timedelta(hours=every)):
         log("== Cerco le pagine prodotto sui negozi...")
-        state.update(products=discover(cfg, health), discovered_at=now_utc().isoformat(),
-                     config_hash=config_hash(cfg))
+        found = discover(cfg, health)
+        # salta le pagine gia' scartate negli ultimi 3 giorni (accessori, altri prodotti...)
+        skip_until = (now_utc() - timedelta(days=3)).isoformat()
+        irrelevant = {u: t for u, t in state.get("irrelevant", {}).items() if t > skip_until}
+        state["irrelevant"] = irrelevant
+        old = state.get("products", {})
+        for iid, urls in found.items():
+            extra = set(next(i for i in cfg["articoli"] if i["id"] == iid).get("link_extra") or [])
+            keep = [u for u in urls if u not in irrelevant or u in extra]
+            found[iid] = list(dict.fromkeys(old.get(iid, []) + keep))  # le pagine buone gia' note restano
+        state.update(products=found, discovered_at=now_utc().isoformat(), config_hash=config_hash(cfg))
+        state_path.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
     products = state.get("products", {})
+    products = {it["id"]: products.get(it["id"], []) for it in cfg["articoli"]}
     for it in cfg["articoli"]:
         log(f"   {it['nome']}: {len(products.get(it['id'], []))} pagine da controllare")
 
     # 2) controllo prezzi
     log("== Controllo prezzi e disponibilità...")
-    offers, state["products"] = check_products(cfg, products, health)
+    budget = cfg["impostazioni"].get("tempo_massimo_minuti", 30) * 60
+    offers, state["products"] = check_products(cfg, products, health, deadline=t0 + budget)
+    still = {u for urls in state["products"].values() for u in urls}
+    stamp = now_utc().isoformat()
+    for urls in products.values():
+        for u in urls:
+            if u not in still:
+                state.setdefault("irrelevant", {})[u] = stamp
 
     # 3) messaggi
     msgs = []

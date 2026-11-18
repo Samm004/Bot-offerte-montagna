@@ -72,10 +72,11 @@ Al giro successivo il bot rifà le ricerche. Ogni campo è spiegato nei commenti
 ## Limiti da sapere
 
 - Il bot **avvisa, non compra**.
+- Avvisa **solo se la vostra taglia risulta disponibile**: niente "taglia da verificare".
 - **Sportler** non è incluso perché blocca i bot. **Amazon** usatelo con Keepa o CamelCamelCamel.
-- **Alpinstore** non dice quali taglie ha in magazzino: per quel negozio l'avviso dice "taglia da verificare".
+- Il **primo giro** dopo ogni modifica di `config.yaml` è lento (fino a 30 minuti): il bot rifà tutte
+  le ricerche e, se non finisce, continua al giro dopo. Poi i controlli tornano veloci.
 - GitHub può ritardare i giri di qualche minuto nelle ore di punta, e alcuni siti potrebbero bloccare
   i server di GitHub. In quel caso arriva l'avviso ⚠️.
-- Per i gusci "di qualsiasi marca" il bot controlla una lista di modelli di fascia simile al Crater IV
-  (Mammut, Patagonia, Rab, Mountain Equipment, Salewa, Arc'teryx, Norrøna, Ortovox). Se vi interessa
-  un altro modello, aggiungetelo in `config.yaml`.
+- Per ogni articolo il bot cerca sia modelli precisi (es. Crater IV, Air Tech Evo) sia in modo generico
+  ("corda singola", "giacca hardshell"...), poi tiene solo ciò che rispetta taglia, diametro e prezzo.

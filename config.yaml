@@ -9,11 +9,11 @@ impostazioni:
   pausa_tra_richieste_secondi: 2            # per non "martellare" i siti
   ora_riepilogo_giornaliero: 9              # ora italiana del messaggio del mattino
   avvisa_se_negozio_non_funziona_dopo: 3    # controlli falliti di fila prima dell'avviso
+  tempo_massimo_minuti: 30                  # oltre, il bot salva e finisce il lavoro al giro dopo
 
 # Negozi in cui il bot CERCA da solo i prodotti ({q} = testo cercato).
-# Tutti verificati: il bot riesce a leggere prezzo e disponibilita'.
-#   taglie_non_leggibili: true -> il negozio non dice quali taglie ha in magazzino;
-#   il bot avvisa lo stesso ma vi scrive "taglia da verificare".
+# Tutti verificati: il bot legge prezzo e disponibilita' per ogni taglia.
+# Avvisa SOLO se la vostra taglia risulta disponibile.
 negozi:
   - nome: Bergfreunde
     ricerca: "https://www.bergfreunde.it/index.php?cl=search&searchparam={q}"
@@ -27,15 +27,17 @@ negozi:
     ricerca: "https://df-sportspecialist.it/search?q={q}"
   - nome: Nencini Sport
     ricerca: "https://www.nencinisport.it/it/search.html?searchkey={q}"
+    pausa: 6                      # blocca se si fanno richieste troppo ravvicinate
   - nome: Sestogrado
     ricerca: "https://www.sestogrado.it/it/?s={q}&post_type=product&type_aws=true"
   - nome: Alpinstore
     ricerca: "https://www.alpinstore.com/index.php?controller=search&search_query={q}"
-    taglie_non_leggibili: true
   - nome: Max Sport Store
     ricerca: "https://maxsportstore.com/search?q={q}"
   - nome: Sportfits
     ricerca: "https://sportfits.eu/search?sSearch={q}"
+  - nome: Decathlon               # utile per rinvii/attrezzatura Klimb (ex Simond)
+    ricerca: "https://www.decathlon.it/search?Ntt={q}"
   - nome: Tonton Outdoor          # ricerca non leggibile: solo i link_extra
     sito: "https://www.tonton-outdoor.com"
   # Sportler: NON incluso, il sito blocca i bot con un controllo anti-robot.
@@ -56,8 +58,36 @@ escludi_sempre: [women, womens, woman, donna, damen, w, wmn, lady, ladies, femme
 #       parole       parole che DEVONO esserci nel nome del prodotto
 #       escludi      parole che scartano il prodotto
 #       filtro_link  (opzionale) parole che devono esserci nel link della pagina
+#       parole_una_di / filtro_link_una_di   basta UNA di queste parole
+#       max_link     quante pagine prendere dai risultati (default 12)
+#   prezzo_min   -> ignora prodotti sotto questo prezzo (accessori, articoli di fascia bassa)
 #   link_extra   -> pagine prodotto da controllare sempre (negozi senza ricerca)
+#
+#  Le "ricerche generiche" (es. "corda singola") pescano qualsiasi marca:
+#  il bot poi tiene solo quello che corrisponde a diametro / taglia / prezzo.
 # ----------------------------------------------------------------------------
+
+# liste di parole riutilizzate sotto
+parole_corda: &parole_corda [corda, corde, rope, ropes, seil, kletterseil, halbseil, einfachseil,
+                             zwillingsseil, cuerda]
+parole_giacca: &parole_giacca [giacca, jacket, jkt, anorak, jacke]
+parole_guscio: &parole_guscio [hardshell, gtx, gore, goretex, shell, hs, 3l, futurelight, pertex,
+                               dryq, aquadefence, h2no, ascentshell]
+parole_piccozza: &parole_piccozza [piccozza, piccozze, axe, piolet, eispickel, pickel, piolets]
+parole_ramponi: &parole_ramponi [ramponi, rampone, crampon, crampons, steigeisen]
+parole_lana: &parole_lana [merino, wool, lana, merinowolle, wolle, laine,
+                           icebreaker, smartwool, ortovox, devold, woolpower, brynje, aclima, royale]
+parole_maglia: &parole_maglia [shirt, tshirt, t, tee, maglia, maglietta, top, crew, crewe, longsleeve, ls, sleeve,
+                               ss, base, layer, baselayer, langarmshirt, funktionsshirt, shirts, maglie]
+parole_manica_lunga: &parole_manica_lunga [ls, long, longsleeve, lunga, lunghe, langarm, langarmshirt, ml]
+parole_manica_corta: &parole_manica_corta [ss, short, corta, corte, kurzarm, mc, tee, tshirt, t]
+escludi_maglie: &escludi_maglie [socks, sock, calze, calza, boxer, boxers, brief, briefs, slip, mutande,
+                                 bra, reggiseno, canotta, tank, singlet, leggings, tights, pant, pants,
+                                 pantaloni, calzamaglia, shorts, beanie, berretto, cap, hat, buff, tubular,
+                                 scaldacollo, neck, gaiter, guanti, gloves, giacca, jacket, vest, gilet,
+                                 hoody, hoodie, felpa, dress, abito, polo]
+parole_imbrago: &parole_imbrago [imbrago, imbraghi, imbracatura, harness, gurt, klettergurt, sitzgurt, baudrier]
+
 articoli:
 
   # ------------------------------------------------------------- GUSCI
@@ -66,12 +96,17 @@ articoli:
     taglie: [M, L]
     prezzo_max: 300
     prezzo_top: 250
+    prezzo_min: 180      # sotto i 180 € sono giacche antipioggia economiche, non gusci da alpinismo
     # scarta pantaloni, ghette, guanti, giacche imbottite, pile... (stessi nomi di linea)
     escludi: [pant, pants, pantaloni, pantalone, hose, bib, salopette, shorts, short, glove, gloves,
               guanti, guanto, mitt, mitts, gilet, vest, cap, hat, berretto, beanie, fleece, pile,
               down, piumino, primaloft, insulated, softshell, alpha, octa, warm1, warm2, warm3,
               wool, merino, shirt, tshirt, maglia, maglietta, hoody, hoodie, bag, zaino,
-              gaiter, gaiters, ghetta, ghette, gamaschen, boot, boots, scarpone, scarponi, shoe, shoes]
+              gaiter, gaiters, ghetta, ghette, gamaschen, boot, boots, scarpone, scarponi, shoe, shoes,
+              # giacche da pioggia/trekking, imbottite, 2 strati, marche non da montagna
+              rain, thermo, invernale, winter, 2l, 5l, paclite, daiwa, fishing, pesca, golf, urban, city,
+              ski, sci, snowboard, running, trail, run, bike, mtb, cycling]
+    richiedi_una_di: [giacca, jacket, jkt, anorak, jacke, hooded]
     modelli:
       - cerca: "crater"                 # Mammut Crater IV / Light / Pro HS
         parole: [mammut, crater]
@@ -100,6 +135,17 @@ articoli:
       - cerca: "westalpen 3l"           # Ortovox Westalpen 3L
         parole: [westalpen, 3l]
         filtro_link: [westalpen]
+      # ricerche generiche: qualsiasi guscio da uomo di qualsiasi marca
+      - &guscio_generico
+        cerca: "giacca hardshell"
+        parole: []
+        parole_una_di: [*parole_guscio, *parole_giacca]
+        filtro_link: []
+        filtro_link_una_di: [hardshell, gtx, gore, tex, shell, hs, 3l, giacca, jacket, jacke]
+        max_link: 40
+      - {<<: *guscio_generico, cerca: "giacca gore-tex uomo"}
+      - {<<: *guscio_generico, cerca: "hardshell jacket"}
+      - {<<: *guscio_generico, cerca: "giacca alpinismo"}
 
   # ------------------------------------------------------------- SCARPONI
   - id: trango-alpine
@@ -130,8 +176,8 @@ articoli:
     nome: "Corda ~8 mm da 60 m"
     taglie: ["60m"]
     diametro: [7.6, 8.7]
-    prezzo_max: 150
-    prezzo_top: 120
+    prezzo_max: 130
+    prezzo_top: 110
     escludi: &escludi_corde [statica, static, semistatica, semi, cordino, cordini, accessory,
                              kit, bag, sacca, sacco, telo, tarp, protector, protezione, marker]
     modelli:
@@ -145,13 +191,24 @@ articoli:
       - {cerca: "alpine sender", parole: [alpine, sender]} # Mammut Alpine Sender 8.7
       - {cerca: "alpine core", parole: [alpine, core]}     # Mammut Alpine Core 8.7
       - {cerca: "mammut phoenix", parole: [phoenix]}       # Mammut Phoenix 8.0
+      # ricerche generiche: qualsiasi marca, filtrata per diametro e lunghezza
+      - &corda_generica
+        cerca: "mezza corda"
+        parole: []
+        filtro_link: []
+        filtro_link_una_di: *parole_corda
+        max_link: 40
+      - {<<: *corda_generica, cerca: "corda gemellare"}
+      - {<<: *corda_generica, cerca: "corda 8 mm"}
+      - {<<: *corda_generica, cerca: "half rope"}
+      - {<<: *corda_generica, cerca: "corda dinamica"}
 
   - id: corda-80m-9-5mm
     nome: "Corda ~9,5 mm da 80 m"
     taglie: ["80m"]
     diametro: [9.2, 9.8]
-    prezzo_max: 220
-    prezzo_top: 180
+    prezzo_max: 170
+    prezzo_top: 150
     escludi: *escludi_corde
     modelli:
       - {cerca: "beal booster", parole: [booster]}         # Beal Booster III 9.7
@@ -165,3 +222,251 @@ articoli:
       - {cerca: "edelrid heron", parole: [heron]}          # Edelrid Heron 9.8
       - {cerca: "tendon ambition", parole: [ambition]}     # Tendon Ambition 9.8
       - {cerca: "edelweiss curve", parole: [curve]}        # Edelweiss Curve 9.8
+      - {cerca: "edelweiss thunder", parole: [thunder]}    # Edelweiss Thunder 9.5
+      - {cerca: "petzl volta", parole: [volta]}            # Petzl Volta 9.2
+      # ricerche generiche: qualsiasi marca, filtrata per diametro e lunghezza
+      - {<<: *corda_generica, cerca: "corda singola"}
+      - {<<: *corda_generica, cerca: "corda intera"}
+      - {<<: *corda_generica, cerca: "corda 9.5"}
+      - {<<: *corda_generica, cerca: "corda 9.8"}
+      - {<<: *corda_generica, cerca: "rope 9.5"}
+      - {<<: *corda_generica, cerca: "corda dinamica"}
+
+  # ------------------------------------------------------------- PICCOZZE
+  # Piccozze classiche da alpinismo (non attrezzi da ghiaccio tecnici).
+  # taglie: lunghezze accettate. [] = qualsiasi lunghezza.
+  - id: piccozza
+    nome: "Piccozza classica da alpinismo"
+    taglie: ["50cm", "51cm", "52cm", "53cm", "54cm", "55cm", "50", "51", "52", "53", "54", "55"]
+    prezzo_max: 130
+    prezzo_top: 100
+    prezzo_min: 50       # sotto: lacci, protezioni, accessori
+    escludi: [nomic, ergo, quark, fusion, dragonne, leash, laccio, lacci, protezione, protezioni,
+              protector, guard, cover, copri, becca, lama, pick, blade, puntale, spike, martello,
+              hammer, adze, pala, paletta, shovel, griprest, trigger, holster, porta, holder,
+              ramponi, rampone, crampon, crampons, kit, set]
+    richiedi_una_di: *parole_piccozza
+    modelli:
+      - {cerca: "air tech", parole: [air, tech]}             # Grivel Air Tech Evo / Racing
+      - {cerca: "ghost evo", parole: [grivel, ghost]}        # Grivel Ghost Evo
+      - {cerca: "summit evo", parole: [petzl, summit]}       # Petzl Summit Evo / Summit
+      - {cerca: "sum'tec", parole: [sum, tec]}               # Petzl Sum'Tec
+      - {cerca: "raven", parole: [raven]}                    # Black Diamond Raven / Pro / Ultra
+      - {cerca: "venom", parole: [venom]}                    # Black Diamond Venom
+      - {cerca: "alpin tour", parole: [alpin, tour]}         # Climbing Technology Alpin Tour
+      - {cerca: "corsa alpin", parole: [corsa]}              # CAMP Corsa Alpin / Nanotech
+      # ricerche generiche: qualsiasi piccozza da alpinismo
+      - &piccozza_generica
+        cerca: "piccozza"
+        parole: []
+        parole_una_di: *parole_piccozza
+        filtro_link: []
+        filtro_link_una_di: *parole_piccozza
+        max_link: 40
+      - {<<: *piccozza_generica, cerca: "piccozza alpinismo"}
+      - {<<: *piccozza_generica, cerca: "ice axe"}
+
+  # ------------------------------------------------------------- RAMPONI
+  # 12 punte, semiautomatici (puntale con fettuccia + leva al tallone):
+  # compatibili con Trango Alpine e Aequilibrium ST (scarponi B2).
+  - id: ramponi
+    nome: "Ramponi 12 punte semiautomatici"
+    taglie: []                       # i ramponi sono quasi sempre taglia unica
+    prezzo_max: 120
+    prezzo_top: 100
+    prezzo_min: 60                   # sotto: antizoccolo, sacche, ricambi
+    # scarta: a cinghie (classic/flexlock/strap), automatici (step-in), accessori
+    escludi: [flexlock, fl, strap, straps, classic, cramp, step, universal, antibott, antiboot, antizoccolo,
+              abp, anti, bag, sacca, custodia, pouch, case, protector, protezione, protezioni, spare,
+              ricambio, ricambi, kit, link, barra, bar, front, puntale, puntali, 10, 10p, 8, 8p, 14,
+              g10, g14, g20, g22, wide]
+    richiedi_una_di: *parole_ramponi
+    modelli:
+      - {cerca: "vasak leverlock", parole: [vasak]}            # Petzl Vasak Leverlock
+      - {cerca: "sarken leverlock", parole: [sarken]}          # Petzl Sarken Leverlock
+      - {cerca: "g12 new-matic", parole: [g12]}                # Grivel G12 New-Matic (Evo)
+      - {cerca: "air tech new-matic", parole: [air, tech, matic]}  # Grivel Air Tech New-Matic
+      - {cerca: "stalker semi-automatic", parole: [stalker]}  # CAMP Stalker Semi-Auto
+      - {cerca: "sabretooth clip", parole: [sabretooth]}       # Black Diamond Sabretooth Clip
+      - {cerca: "serac clip", parole: [serac]}                 # Black Diamond Serac Clip
+      - {cerca: "nuptse evo", parole: [nuptse]}                # Climbing Technology Nuptse Evo
+      # ricerche generiche: qualsiasi rampone semiautomatico
+      - &ramponi_generici
+        cerca: "ramponi semiautomatici"
+        parole: []
+        parole_una_di: [*parole_ramponi, [semi, semiautomatico, semiautomatici, semiautomatic, semiauto,
+                                          leverlock, matic, clip, hybrid, ibrido, ibridi]]
+        filtro_link: []
+        filtro_link_una_di: *parole_ramponi
+        max_link: 40
+      - {<<: *ramponi_generici, cerca: "ramponi alpinismo"}
+      - {<<: *ramponi_generici, cerca: "crampons semi automatic"}
+
+  # ------------------------------------------------------------- IMBRAGO
+  # Imbrago da alpinismo a cosciali regolabili, taglia M.
+  - id: imbrago
+    nome: "Imbrago da alpinismo"
+    taglie: [M, "S/M", "M/L", "S-M", "M-L", "1"]   # "1" = taglia Petzl Corax (XS-M)
+    prezzo_max: 70
+    prezzo_top: 55
+    prezzo_min: 35                   # sotto: portamateriale, sacchetti, accessori
+    # scarta: imbraghi da lavoro, pettorali, kit ferrata, bambini
+    escludi: [chest, pettorale, body, completo, kit, set, ferrata, work, lavoro, avao, astro, newton,
+              falcon, sequoia, navaho, volt, toddler, chalk, magnesite, sacchetto, bag, portamateriale,
+              gear, loop, sling, janja]
+    richiedi_una_di: *parole_imbrago
+    modelli:
+      - {cerca: "petzl adjama", parole: [adjama]}              # Petzl Adjama
+      - {cerca: "petzl corax", parole: [corax]}                # Petzl Corax (taglia 1 = XS-M)
+      - {cerca: "momentum harness", parole: [momentum]}        # Black Diamond Momentum
+      - {cerca: "edelrid jay", parole: [edelrid, jay]}         # Edelrid Jay
+      - {cerca: "ophir fast adjust", parole: [ophir]}          # Mammut Ophir Fast Adjust
+      - {cerca: "camp jasper", parole: [jasper]}               # CAMP Jasper CR
+      - {cerca: "petzl altitude", parole: [petzl, altitude]}   # Petzl Altitude (leggero)
+      # ricerche generiche: qualsiasi imbrago da uomo
+      - &imbrago_generico
+        cerca: "imbrago alpinismo"
+        parole: []
+        parole_una_di: *parole_imbrago
+        filtro_link: []
+        filtro_link_una_di: *parole_imbrago
+        max_link: 40
+      - {<<: *imbrago_generico, cerca: "imbrago"}
+      - {<<: *imbrago_generico, cerca: "climbing harness"}
+
+  # ------------------------------------------------------------- MAGLIE MERINO
+  - id: merino-corta
+    nome: "Maglietta merino manica corta"
+    taglie: [M]
+    prezzo_max: 35
+    prezzo_top: 28
+    prezzo_min: 15
+    escludi: [ls, long, longsleeve, lunga, lunghe, langarm, langarmshirt, ml, zip]
+    modelli:
+      - &merino_corta
+        cerca: "t-shirt merino"
+        parole: []
+        parole_una_di: [*parole_lana, *parole_maglia, *parole_manica_corta]
+        escludi: *escludi_maglie
+        filtro_link: []
+        filtro_link_una_di: [merino, wool, lana, icebreaker, smartwool, devold, ortovox, natural, mons,
+                             royale, brynje, woolpower, aclima, rewoolution, bergans, artilect]
+        max_link: 40
+      - {<<: *merino_corta, cerca: "maglia merino manica corta"}
+      - {<<: *merino_corta, cerca: "merino tee"}
+      - {<<: *merino_corta, cerca: "icebreaker"}
+      - {<<: *merino_corta, cerca: "smartwool"}
+      - {<<: *merino_corta, cerca: "ortovox merino"}
+
+  - id: merino-lunga
+    nome: "Maglia merino manica lunga"
+    taglie: [M]
+    prezzo_max: 45
+    prezzo_top: 38
+    prezzo_min: 20
+    escludi: [ss, short, corta, corte, kurzarm, mc, tee, tshirt, t]
+    modelli:
+      - &merino_lunga
+        cerca: "maglia merino manica lunga"
+        parole: []
+        parole_una_di: [*parole_lana, *parole_maglia, *parole_manica_lunga]
+        escludi: *escludi_maglie
+        filtro_link: []
+        filtro_link_una_di: [merino, wool, lana, icebreaker, smartwool, devold, ortovox, natural, mons,
+                             royale, brynje, woolpower, aclima, rewoolution, bergans, artilect]
+        max_link: 40
+      - {<<: *merino_lunga, cerca: "merino long sleeve"}
+      - {<<: *merino_lunga, cerca: "maglia lana merino"}
+      - {<<: *merino_lunga, cerca: "icebreaker"}
+      - {<<: *merino_lunga, cerca: "smartwool"}
+      - {<<: *merino_lunga, cerca: "ortovox merino"}
+
+  # ------------------------------------------------------------- PANTALONI SOFTSHELL
+  # Tipo Vaude Larice: softshell elasticizzati da alpinismo / trekking.
+  - id: pantaloni-softshell
+    nome: "Pantaloni softshell"
+    taglie: [M, "48"]
+    prezzo_max: 90
+    prezzo_top: 75
+    prezzo_min: 50
+    escludi: [shorts, bermuda, "3", tights, leggings, insulated, imbottiti, imbottito, primaloft, down,
+              piumino, bib, salopette, jacket, giacca, vest, gilet, gaiter, ghette, overpant, overpants,
+              harness, imbrago, ski, sci, rain, antipioggia]
+    richiedi_una_di: [pant, pants, pantaloni, pantalone, hose, trousers, trouser]
+    modelli:
+      - {cerca: "vaude larice", parole: [larice]}               # Vaude Larice
+      - {cerca: "salewa agner", parole: [agner]}                # Salewa Agner DST / Durastretch
+      - {cerca: "salewa pedroc", parole: [pedroc]}              # Salewa Pedroc
+      - {cerca: "courmayeur so", parole: [courmayeur]}          # Mammut Courmayeur SO
+      - {cerca: "mammut taiss so pants", parole: [taiss, pants]}  # Mammut Taiss SO
+      - {cerca: "montura vertigo", parole: [vertigo]}           # Montura Vertigo
+      - {cerca: "karpos express", parole: [karpos, express]}    # Karpos Express
+      - {cerca: "ortovox pelmo", parole: [pelmo]}               # Ortovox Pelmo
+      - {cerca: "ortovox brenta", parole: [brenta]}             # Ortovox Brenta
+      - {cerca: "dynafit transalper", parole: [transalper]}     # Dynafit Transalper
+      - {cerca: "rab torque", parole: [torque]}                 # Rab Torque
+      # ricerche generiche: qualsiasi pantalone softshell da uomo
+      - &pant_generico
+        cerca: "pantaloni softshell"
+        parole: []
+        parole_una_di: [[softshell, soft, so, dst, durastretch, stretch, schoeller, dryarn],
+                        [pant, pants, pantaloni, pantalone, hose, trousers, trouser]]
+        filtro_link: []
+        filtro_link_una_di: [pant, pants, pantaloni, pantalone, hose, trousers, softshell]
+        max_link: 40
+      - {<<: *pant_generico, cerca: "softshell pants"}
+      - {<<: *pant_generico, cerca: "pantaloni alpinismo"}
+
+  # ------------------------------------------------------------- RINVII
+  # Il bot legge quanti rinvii ci sono nella confezione dal nome ("Pack 6", "6er-Set", "set da 5"...).
+  - id: rinvii-5
+    nome: "Rinvii, confezione da 5"
+    taglie: ["5PACK"]
+    prezzo_max: 70
+    prezzo_top: 60
+    prezzo_min: 30
+    escludi: &escludi_rinvii [fettuccia, fettucce, dogbone, dogbones, sling, slings, moschettone,
+                              moschettoni, carabiner, carabiners, karabiner, ferrata, kit, corda, rope]
+    richiedi_una_di: &parole_rinvio [rinvio, rinvii, quickdraw, quickdraws, express, expressset, quickpack,
+                                     draw, draws, expressschlingen, exe]
+    modelli: &modelli_rinvii
+      - {cerca: "camp orbit express", parole: [camp, orbit]}        # CAMP Orbit Express KS
+      - {cerca: "camp photon express", parole: [camp, photon, express]}  # CAMP Photon Express
+      - {cerca: "camp dyon", parole: [camp, dyon]}                  # CAMP Dyon
+      - {cerca: "rinvii klimb", parole: [klimb]}                    # Decathlon Klimb (ex Simond)
+      - {cerca: "rinvii simond", parole: [simond]}                  # Simond
+      # ricerche generiche: qualsiasi marca
+      - &rinvii_generici
+        cerca: "set rinvii"
+        parole: []
+        parole_una_di: [rinvio, rinvii, quickdraw, quickdraws, express, expressset, quickpack, draw,
+                        draws, expressschlingen, exe]
+        filtro_link: []
+        filtro_link_una_di: [rinvio, rinvii, quickdraw, quickdraws, express, quickpack, draw, draws,
+                             expressset, expressschlingen, exe]
+        max_link: 40
+      - {<<: *rinvii_generici, cerca: "rinvii"}
+      - {<<: *rinvii_generici, cerca: "quickdraw pack"}
+      - {<<: *rinvii_generici, cerca: "rinvii camp"}
+
+  - id: rinvii-6
+    nome: "Rinvii, confezione da 6"
+    taglie: ["6PACK"]
+    prezzo_max: 80
+    prezzo_top: 70
+    prezzo_min: 30
+    escludi: *escludi_rinvii
+    richiedi_una_di: *parole_rinvio
+    modelli: *modelli_rinvii
+
+  # ------------------------------------------------------------- GRIGRI
+  - id: grigri
+    nome: "Petzl GriGri"
+    taglie: []
+    prezzo_max: 75
+    prezzo_top: 65
+    prezzo_min: 40
+    escludi: [kit, pack, bundle, corda, rope]
+    modelli:
+      - {cerca: "grigri", parole: [grigri]}
+      - {cerca: "petzl grigri", parole: [grigri]}
